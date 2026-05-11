@@ -1,36 +1,52 @@
-name: 'Agent Memory Guard'
-description: 'Scan AI agent memory for poisoning attacks using OWASP Agent Memory Guard (ASI06)'
-author: 'vgudur-dev'
+name: 'OWASP Agent Memory Guard Scan'
+description: 'Scan AI agent code for memory poisoning vulnerabilities (OWASP ASI06). Detects prompt injection, secret leakage, protected key tampering, and size anomalies in agent memory operations.'
+author: 'OWASP Agent Memory Guard Project'
 
 branding:
   icon: 'shield'
-  color: 'red'
+  color: 'blue'
 
 inputs:
-  memory-file:
-    description: 'Path to the memory file or directory to scan (JSON, YAML, or plain text)'
+  scan-path:
+    description: 'Path to scan for agent memory operations (default: entire repo)'
     required: false
-    default: ''
-  threshold:
-    description: 'Risk threshold (low, medium, high). Findings at or above this level will fail the check.'
+    default: '.'
+  fail-on-findings:
+    description: 'Fail the workflow if vulnerabilities are found'
+    required: false
+    default: 'true'
+  include-patterns:
+    description: 'Comma-separated glob patterns for files to include (e.g., "**/*.py,**/*.js")'
+    required: false
+    default: '**/*.py'
+  exclude-patterns:
+    description: 'Comma-separated glob patterns for files to exclude'
+    required: false
+    default: '**/test*/**,**/node_modules/**,**/.venv/**'
+  min-severity:
+    description: 'Minimum severity to report: low, medium, high, critical'
     required: false
     default: 'medium'
   output-format:
-    description: 'Output format for the scan results (text, json, sarif)'
+    description: 'Output format: text, json, sarif'
     required: false
     default: 'text'
-  fail-on-finding:
-    description: 'Whether to fail the workflow if a poisoning attempt is detected'
+  python-version:
+    description: 'Python version to use'
     required: false
-    default: 'true'
+    default: '3.11'
 
 outputs:
   findings-count:
-    description: 'Number of poisoning findings detected'
-  risk-level:
-    description: 'Highest risk level detected (none, low, medium, high, critical)'
+    description: 'Total number of findings detected'
+  critical-count:
+    description: 'Number of critical severity findings'
+  high-count:
+    description: 'Number of high severity findings'
   report-path:
-    description: 'Path to the generated scan report'
+    description: 'Path to the generated report file'
+  sarif-path:
+    description: 'Path to SARIF output (for GitHub Security tab integration)'
 
 runs:
   using: 'composite'
@@ -38,17 +54,29 @@ runs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: ${{ inputs.python-version }}
 
     - name: Install Agent Memory Guard
       shell: bash
       run: |
-        pip install agent-memory-guard --quiet
+        pip install agent-memory-guard
 
-    - name: Run Agent Memory Guard scan
-      shell: bash
+    - name: Run Memory Security Scan
       id: scan
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.scan-path }}
+        INCLUDE_PATTERNS: ${{ inputs.include-patterns }}
+        EXCLUDE_PATTERNS: ${{ inputs.exclude-patterns }}
+        MIN_SEVERITY: ${{ inputs.min-severity }}
+        OUTPUT_FORMAT: ${{ inputs.output-format }}
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
       run: |
-        echo "Agent Memory Guard scan complete"
-        echo "findings-count=0" >> $GITHUB_OUTPUT
-        echo "risk-level=none" >> $GITHUB_OUTPUT
+        python ${{ github.action_path }}/scan.py
+
+    - name: Upload SARIF to GitHub Security
+      if: inputs.output-format == 'sarif' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif-path }}
+      continue-on-error: true
